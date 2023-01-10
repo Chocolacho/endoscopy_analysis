@@ -1,0 +1,123 @@
+library("dplyr")
+library("tidyverse")
+library("lubridate")
+library("stringr")
+library("fmsb")
+library("scales")
+
+
+
+#import table
+#sur xcel, remplacer . par NA
+#ajout une colonne, convertir DATE_PRéLéVEMENT avec espace et supprimer les h:m
+#Changer pour format date
+#copie-colle en tsv dans .txt
+
+BASE <- read_tsv("Base_endoscopie.txt")
+BASE
+BASE <- BASE %>% mutate(DATE_PRÉLÉVEMENT = dmy(BASE$DATE_PRÉLÉVEMENT)) %>%
+  mutate(MOIS_PRLVT = month(BASE$DATE_PRÉLÉVEMENT)) %>%
+  mutate(EXTD_NUM = BASE$NUM_TOUS_CANAUX+BASE$NUM_EXTREMITÉ) %>%
+  mutate(EXTD_INDIC = ifelse(GERME_INDIC_TOUS_CANAUX=="Oui"|GERME_INDIC_EXTREMITÉ=="Oui","Oui","Non"))
+  
+BASE <- BASE %>% mutate(YEAR_PRLVT = year(BASE$DATE_PRÉLÉVEMENT)) 
+BASE
+
+#Choice year to analyse
+YEAR = 2022
+
+# Separate Base despite year
+BASE_2020 <- BASE %>% filter(YEAR_PRLVT==2020)
+BASE_2021 <- BASE %>% filter(YEAR_PRLVT==2021)
+BASE_2022 <- BASE %>% filter(YEAR_PRLVT==2022)
+
+#Conformité globale
+CONF_GLOB <- data.frame(Interpretation = c("Conforme","A surveiller","Non conforme"))
+for(i in c(1,2,3)){
+  YEAR = 2019 + i
+  C <- BASE %>% filter(YEAR_PRLVT==YEAR) %>% filter(INTERPRETATION=="conforme") %>% nrow()
+  AL <- BASE %>% filter(YEAR_PRLVT==YEAR) %>% filter(INTERPRETATION=="A surveill") %>% nrow()
+  NC <- BASE %>% filter(YEAR_PRLVT==YEAR) %>% filter(INTERPRETATION=="Non confo") %>% nrow()
+  TABLE_PROV <- data.frame(YEAR = c(C, AL, NC))
+  colnames(TABLE_PROV) <- paste(YEAR)
+  CONF_GLOB <- cbind(CONF_GLOB, TABLE_PROV)
+}
+
+#Conformité globale origine non-conf
+
+
+
+#Conformité systématique
+
+
+
+#Résultat global par année
+BASE_PER_YEAR <- BASE %>% group_by("YEAR_PRLVT")
+
+BASE_PER_YEAR
+
+Liste_service_CHU <- list(unique(UF_service$`Libellé Service`))
+
+UF_service <- UF_service %>% 
+  rename("UF"="Code UF", "Service"="Libellé Service", "Pole"="Libellé pôle") %>% 
+  select("UF","Service","Pole")
+UF_service 
+Base_JH <- merge(Base_JH, UF_service, by="UF", all.x = TRUE)
+Base_JH <- as.tibble(Base_JH)
+Base_JH
+Total_Base_JH <- sum(Base_JH$JH)
+Base_travail <- merge(Base_travail, UF_service, by="UF", all.x = TRUE)
+Base_travail <- as.tibble(Base_travail)
+Base_travail
+
+Total_JH_bydpt <- Base_JH %>% group_by(Base_JH$"Service") %>%
+    summarise(
+    JH = sum(JH),
+    Pole
+  )
+Total_JH_bydpt <- rename(Total_JH_bydpt, "Service"=`Base_JH$Service`)
+Total_JH_bydpt <- Total_JH_bydpt[!duplicated(Total_JH_bydpt$Service),]
+Total_JH_bydpt
+
+
+
+#Analyse BLSE -> incidence des infections
+
+Base_travail_BLSE <- Base_travail %>% filter(`TBMR` == "EBLSE") %>% filter(DOUBLON == 1)
+N_screen_BLSE <- Base_travail_BLSE %>% filter(`Type de prélèvement`=="Dépistage") %>% count() %>% as.numeric()
+INF_BLSE_2020 <- Base_travail_BLSE %>% filter(`Type de prélèvement` == "Diagnostic")
+INF_BLSE_2020 %>% count(BMR)
+#Totaux BLSE 2020
+N_noso_BLSE_2020 <- INF_BLSE_2020 %>% filter(DELAY > 2) %>% count() %>% as.numeric()
+TOT_Inc_BLSE_2020 <- INF_BLSE_2020 %>% summarise(
+  Inc_BLSE_2020 = (count(INF_BLSE_2020)/Total_Base_JH)*1000,
+  Inc_BLSE_noso_2020 = (N_noso/Total_Base_JH)*1000)
+TOT_Inc_BLSE_2020
+TOT_Inc_BLSE_2020 %>% rename("Inc_2020"=`Inc_BLSE_2020$n `,"Inc_noso_2020"=`Inc_BLSE_noso_2020`)
+#Spéaration par service
+Dpt_INF_BLSE_2020 <- INF_BLSE_2020 %>% count(Service)
+Dpt_N_noso_BLSE_2020 <- INF_BLSE_2020 %>% filter(DELAY>2) %>% count(Service)
+Dpt_INF_BLSE_2020
+Dpt_N_noso_BLSE_2020
+TABLE_inc_BLSE_2020 <- merge(Dpt_INF_BLSE_2020, Dpt_N_noso_BLSE_2020, by="Service") %>% 
+  merge(Total_JH_bydpt, by="Service") %>% 
+  rename("cas"="n.x", "noso"="n.y")
+TABLE_inc_BLSE_2020
+Inc_BLSE_2020 <- TABLE_inc_BLSE_2020 %>% summarise(
+  Service,
+  Pole,
+  Inc = cas/JH*1000,
+  Inc_noso = noso/JH*1000
+)
+Inc_BLSE_2020 
+
+
+Base_travail_BLSE
+
+
+
+
+
+write_tsv(Base_travail, file="Base_travail_service.tsv")
+
+Base_travail$UF[Base_travail$UF == UF_service$`Code UF`]
